@@ -45,7 +45,7 @@ Os pesos iniciais e finais do modelo são salvos no arquivo `pesos.txt`.
 Para compilar o código, execute o comando abaixo no terminal:
 
 ```bash
-nasm -felf64 lab3.asm && ld -o lab3 lab3.o
+nasm -felf64 perceptron.asm && ld -o perceptron perceptron.o
 ```
 
 ## Uso
@@ -53,7 +53,7 @@ nasm -felf64 lab3.asm && ld -o lab3 lab3.o
   Executando o Programa:
   Rode o executável gerado:
 
-  ```./lab3```
+  ```./perceptron```
 
 ## Fluxo de Execução:
   - **Exibição dos Parâmetros Iniciais:**
@@ -134,7 +134,7 @@ O código está organizado em três seções principais:
 
 ## Arquivos
 
-  **lab3.asm:** Código fonte principal escrito em Assembly.
+  **perceptron.asm:** Código fonte principal escrito em Assembly.
   
   **classificacao.txt:** Arquivo de entrada para os dados de classificação.
   
