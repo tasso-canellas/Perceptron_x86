@@ -632,69 +632,121 @@
     ; train_regressao – Treina o modelo para regressão.
     ; Nesta versão, o código acumula as atualizações de weight_x e bias
     ; para todos os exemplos e só as aplica ao final de cada época.
-    train_regressao:
-    .loop_start_reg:
-        mov rax, [epoch_counter]
-        cmp rax, 0
-        je .end_train_reg
 
-        ; Inicializa acumuladores para os ajustes
-        xor r14, r14   ; acumulador para weight_x (ajuste acumulado em ponto fixo)
-        xor r15, r15   ; acumulador para bias (soma de +1 ou -1)
+   ; -------------------------
+; train_regressao – Treina o modelo para regressão.
+; Nesta versão, o código acumula as atualizações de weight_x e bias
+; para todos os exemplos e só as aplica ao final de cada época.
+train_regressao:
+   ; Salva os registradores que precisamos preservar
+   push rbx
+   push r12
+   push r13
+   push r14
+   push r15
 
-        mov rcx, [class1_count]   ; Número de exemplos
-        xor rbx, rbx              ; Índice inicia em 0
+.loop_start_reg:
+    ; Verifica se ainda há épocas para processar
+    mov rax, [epoch_counter]
+    cmp rax, 0
+    je .end_train_reg
 
-    .reg_loop:
-        cmp rbx, rcx
-        jge .update_params
-        mov r10, qword [class1_x + rbx*8]   ; x
-        mov r11, qword [class1_y + rbx*8]     ; alvo
-        mov rdi, r10
-        call forward_pass_reg                 ; predição = (x * weight_x)/1000 + bias
-        mov r9, rax                         ; guarda predição
-        mov r8, r11                         ; alvo
-        sub r8, r9                          ; erro = alvo - predição
+    ; Inicializa acumuladores para os ajustes com zero
+    xor r14, r14   ; acumulador para weight_x
+    xor r15, r15   ; acumulador para bias
 
-        ; Acumula ajuste para weight_x: (erro * x)/1000
-        mov rax, r8
-        imul rax, r10
-        mov r13, 1000
-        cqo
-        idiv r13
-        add r14, rax
+    ; Taxa de aprendizado - definida como 1 (equivalente a 0.001 em ponto fixo)
+    mov r12, 1
 
-        ; Acumula ajuste para bias: se erro > 0 soma +1; se erro < 0, -1
-        cmp r8, 0
-        jg .bias_positive_accum
-        jl .bias_negative_accum
-        jmp .next_example
-    .bias_positive_accum:
-        inc r15
-        jmp .next_example
-    .bias_negative_accum:
-        dec r15
-        jmp .next_example
-    .next_example:
-        inc rbx
-        jmp .reg_loop
+    ; Percorre todos os exemplos
+    mov rcx, [class1_count]   ; Número de exemplos
+    xor rbx, rbx              ; Índice inicia em 0
 
-    .update_params:
-        ; Aplica os ajustes acumulados aos parâmetros
-        mov rax, [weight_x]
-        add rax, r14
-        mov [weight_x], rax
+.reg_loop:
+    cmp rbx, rcx
+    jge .update_params
 
-        mov rax, [bias]
-        add rax, r15
-        mov [bias], rax
+    ; Carrega x e y do exemplo atual
+    mov r10, qword [class1_x + rbx*8]   ; x
+    mov r11, qword [class1_y + rbx*8]   ; y (alvo)
 
-        ; Encerra a época e reinicia o loop de treinamento
-        dec qword [epoch_counter]
-        jmp .loop_start_reg
+    ; Calcula a predição: y_pred = (x * weight_x)/1000 + bias
+    mov rdi, r10
+    call forward_pass_reg
+    mov r9, rax                        ; r9 = predição
 
-    .end_train_reg:
-        ret
+    ; Calcula o erro: erro = alvo - predição
+    mov rax, r11
+    sub rax, r9
+    mov r8, rax                        ; r8 = erro
+
+    ; Para o gradiente do erro quadrático:
+    ; d(erro²)/d(weight_x) = -2 * erro * x, porém usamos 2 na taxa de aprendizado.
+    ;
+    ; Calcula o ajuste para weight_x: erro * x * taxa_aprendizado
+    mov rax, r8        ; rax = erro
+    imul rax, r10      ; rax = erro * x
+    imul rax, r12      ; rax = erro * x * taxa_aprendizado
+    add r14, rax       ; acumula ajuste para weight_x
+
+    ; Calcula o ajuste para bias: erro * taxa_aprendizado
+    mov rax, r8        ; rax = erro
+    imul rax, r12      ; rax = erro * taxa_aprendizado
+    add r15, rax       ; acumula ajuste para bias
+
+    ; Próximo exemplo
+    inc rbx
+    jmp .reg_loop
+
+.update_params:
+    ; Só aplicamos os ajustes depois de processar todos os exemplos
+
+    ; Para weight_x: weight_x += ajuste/1000
+    mov rax, r14                      ; Carrega o ajuste acumulado
+    cqo                               ; Estende o sinal para RDX:RAX para divisão
+    mov r13, 1000
+    idiv r13                          ; RAX = ajuste/1000
+    
+    cmp rax, 0
+    jne .apply_weight_x
+    cmp r14, 0                        ; Verifica o sinal do acumulador original
+    jl .neg_weight_adjust
+    mov rax, 1                        ; Ajuste positivo mínimo
+    jmp .apply_weight_x
+.neg_weight_adjust:
+    mov rax, -1                       ; Ajuste negativo mínimo
+.apply_weight_x:
+    add [weight_x], rax               ; weight_x += ajuste/1000
+
+    ; Para bias: bias += ajuste/1000
+    mov rax, r15
+    cqo
+    mov r13, 1000
+    idiv r13                          ; RAX = ajuste/1000
+    
+    cmp rax, 0
+    jne .apply_bias
+    cmp r15, 0                        ; Verifica o sinal do acumulador original
+    jl .neg_bias_adjust
+    mov rax, 1                        ; Ajuste positivo mínimo
+    jmp .apply_bias
+.neg_bias_adjust:
+    mov rax, -1                       ; Ajuste negativo mínimo
+.apply_bias:
+    add [bias], rax                   ; bias += ajuste/1000
+
+    ; Avança para a próxima época
+    dec qword [epoch_counter]
+    jmp .loop_start_reg
+
+.end_train_reg:
+    ; Restaura os registradores
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
 
     ; ----------------------------------------------------------------
     ; int_to_string – Converte o inteiro em RAX para uma string.
